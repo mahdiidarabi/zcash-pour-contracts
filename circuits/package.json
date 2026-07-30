@@ -1,0 +1,16 @@
+{
+    "name": "zcash-pour-circuits",
+    "private": true,
+    "scripts": {
+        "compile": "bash scripts/compile.sh",
+        "setup": "bash scripts/setup.sh",
+        "prove": "bash scripts/prove.sh",
+        "export-verifier": "bash scripts/export-verifier.sh",
+        "all": "npm run compile && npm run setup && npm run export-verifier",
+        "clean": "rm -rf build"
+    },
+    "dependencies": {
+        "circomlib": "^2.0.5",
+        "snarkjs": "^0.7.6"
+    }
+}
