@@ -8,7 +8,7 @@
   set -euo pipefail
   cd "$(dirname "$0")/.."
 
-  CIRCUIT="${CIRCUIT:-Multiplier}"
+ CIRCUIT="${1:-${CIRCUIT:-Multiplier}}"
   SRC="circuits/${CIRCUIT}.circom"
   BUILD="build/${CIRCUIT}"
 

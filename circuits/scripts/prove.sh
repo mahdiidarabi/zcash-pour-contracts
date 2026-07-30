@@ -8,9 +8,9 @@
   set -euo pipefail
   cd "$(dirname "$0")/.."
   
-  CIRCUIT="${CIRCUIT:-Multiplier}"
+  CIRCUIT="${1:-${CIRCUIT:-Multiplier}}"
   BUILD="build/${CIRCUIT}"
-  INPUT="${INPUT:-inputs/${CIRCUIT}.json}"
+  INPUT="${2:-${INPUT:-inputs/${CIRCUIT}.json}}"
 
   sha256() {
     if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1

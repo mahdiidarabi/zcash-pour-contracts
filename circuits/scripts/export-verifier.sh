@@ -11,7 +11,7 @@
   set -euo pipefail
   cd "$(dirname "$0")/.."
   
-  CIRCUIT="${CIRCUIT:-Multiplier}"
+ CIRCUIT="${1:-${CIRCUIT:-Multiplier}}"
   BUILD="build/${CIRCUIT}"
   OUT_DIR="../contracts/contracts/verifiers"
 

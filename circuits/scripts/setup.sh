@@ -17,8 +17,8 @@
   set -euo pipefail
   cd "$(dirname "$0")/.."
 
-  CIRCUIT="${CIRCUIT:-Multiplier}"
-  POWER="${POWER:-12}"
+  CIRCUIT="${1:-${CIRCUIT:-Multiplier}}"
+  POWER="${2:-${POWER:-12}}"
   BUILD="build/${CIRCUIT}"
   PTAU="ptau/pot${POWER}_final.ptau"
 
