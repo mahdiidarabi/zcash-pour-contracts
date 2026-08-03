@@ -14,5 +14,6 @@
 
   bash scripts/compile.sh         "$CIRCUIT"
   bash scripts/setup.sh           "$CIRCUIT" "$POWER"
+  bash scripts/prove.sh           "$CIRCUIT"
   bash scripts/export-verifier.sh "$CIRCUIT"
 
