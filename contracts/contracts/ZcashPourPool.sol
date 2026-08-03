@@ -19,6 +19,10 @@ contract ZcashPourPool is ZcashPourVerifier {
     uint256 public totalSupply;
     uint256 public commitmentIndex;
 
+    event CommitmentSubmitted(uint256 commitIndex, uint256 commit);
+    event SnConsumeSubmitted(uint256 snConsume);
+ 
+
 
     constructor() {
         commitmentIndex = 1;
@@ -33,17 +37,20 @@ contract ZcashPourPool is ZcashPourVerifier {
 
         indexToCommitment[commitmentIndex] = _cm;
         commitmentToIndex[_cm] = commitmentIndex;
+
+        emit CommitmentSubmitted(commitmentIndex, _cm);
+
         commitmentIndex++;
 
         totalSupply += _value;
     }
 
     // TEST-ONLY: insert a commitment directly so pour()'s cm_list existence checks pass.
-    function mockAddCommitment(uint256 _cm) public {
-        indexToCommitment[commitmentIndex] = _cm;
-        commitmentToIndex[_cm] = commitmentIndex;
-        commitmentIndex++;
-    }
+    // function mockAddCommitment(uint256 _cm) public {
+    //     indexToCommitment[commitmentIndex] = _cm;
+    //     commitmentToIndex[_cm] = commitmentIndex;
+    //     commitmentIndex++;
+    // }
 
     function pour(uint[2] calldata _pA, uint[2][2] calldata _pB, uint[2] calldata _pC, uint[14] calldata _pubSignals) public {
         require(this.verifyProof(_pA, _pB, _pC, _pubSignals), "invalid proof");
@@ -54,10 +61,12 @@ contract ZcashPourPool is ZcashPourVerifier {
         
         indexToCommitment[commitmentIndex] = cm1;
         commitmentToIndex[cm1] = commitmentIndex;
+        emit CommitmentSubmitted(commitmentIndex, cm1);
         commitmentIndex++;
 
         indexToCommitment[commitmentIndex] = cm2;
         commitmentToIndex[cm2] = commitmentIndex;
+        emit CommitmentSubmitted(commitmentIndex, cm2);
         commitmentIndex++;
 
         
@@ -100,6 +109,8 @@ contract ZcashPourPool is ZcashPourVerifier {
 
         snConsumeList[sn_consme] = true;
 
+        emit SnConsumeSubmitted(sn_consme);
+
     }
 
     // burn is the inverse of mint: it destroys an existing shielded coin and
@@ -124,6 +135,8 @@ contract ZcashPourPool is ZcashPourVerifier {
         // Effects before interaction (reentrancy-safe). totalSupply underflows
         // and reverts if it would drop below the burned value.
         snConsumeList[snConsume] = true;
+        emit SnConsumeSubmitted(snConsume);
+
         totalSupply -= _value;
 
         (bool ok, ) = payable(_recipient).call{value: _value}("");
