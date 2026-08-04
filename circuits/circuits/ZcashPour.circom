@@ -112,11 +112,16 @@ template pour_circuit(){
 
     v === v1+v2;
 
-    // claim 2 check 0 <= v1 < 2^32 and  0 <= v2 < 2^32 with Num2Bits
-    component range1 = Num2Bits(32);
+    // claim 2 check 0 <= v1 < 2^128 and  0 <= v2 < 2^128 with Num2Bits
+    //
+    // 128 bits so a note can hold a real wei amount. These range checks are the
+    // reason the balance holds over the integers instead of modulo p: bounded by
+    // 2^128 each, v1 + v2 cannot wrap the field. Widening past ~2^253 would break
+    // that. Keep lib/limits.js in step with this width.
+    component range1 = Num2Bits(128);
     range1.in <== v1;
 
-    component range2 = Num2Bits(32);
+    component range2 = Num2Bits(128);
     range2.in <== v2;
 
     // now let's calculate cm1 and cm2

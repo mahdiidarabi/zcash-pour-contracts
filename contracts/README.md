@@ -92,47 +92,49 @@ The pool links three Poseidon libraries, so verification needs their addresses.
 pass, so there is nothing to keep in sync by hand. Run it from this directory —
 `hardhat-verify` resolves the `--libraries` path against the working directory.
 
-## Building note data
+## Calling the pool
 
-Notes are built off-chain by [`../circuits/tools/`](../circuits/README.md):
-
-```bash
-cd ../circuits
-node tools/new-note.js --value 100 --name alice     # -> notes/alice.json
-```
+Note data is built off-chain by [`../circuits/tools/`](../circuits/README.md). The full
+end-to-end walkthrough is in the [root README](../README.md#the-full-path); the contract
+side of it is:
 
 ```js
 const note = require("../circuits/notes/alice.json");
 
+// shield
 await pool.mint(note.mint._value, note.mint._cm, note.mint._r, note.mint._snProduce,
                 { value: note.mint._value });
 
+// spend privately (proof built by circuits/tools/pour-input.js + calldata.js)
+const { pA, pB, pC, pubSignals } = require("../circuits/calldata.json");
+await pool.pour(pA, pB, pC, pubSignals);
+
+// unshield
 await pool.burn(note.value, note.r, note.rho, note.sk, recipient);
 ```
 
-`ZcashPourNotes.test.ts` does exactly this against a real deployment, and also checks
-each hash in the derivation chain against the contract's `posiden1/2/3` helpers — so if
-the JS and Solidity Poseidon ever drift, the test names which step broke.
+`mint` requires `msg.value == _value`, `_value > 0`, a commitment that matches
+`posiden3(_r, _snProduce, _value)`, and one that has not been minted before.
 
-Values must stay under 2³² wei to remain pourable; see
+`pour` runs **every check before any state change**: proof valid, `ok == 1`, all ten
+`cm_list` entries already on chain, nullifier unspent, both outputs new, and
+`cm1 != cm2`. Only then does it mark the nullifier and insert. The order matters — with
+the inserts first, a proof could list its own fresh outputs inside `cm_list` and pass.
+
+`pour` needs ten commitments to already exist in the pool, so it cannot be the first
+thing you do. See the walkthrough.
+
+`ZcashPourNotes.test.ts` runs mint, the duplicate-mint rejection, and the mint → burn
+round trip against a real deployment, and checks every hash in the derivation chain
+against the contract's `posiden1/2/3` helpers — so if the JS and Solidity Poseidon ever
+drift, the test names which step broke.
+
+Values must stay under 2¹²⁸ wei to remain pourable; see
 [`../circuits/README.md`](../circuits/README.md).
 
-## Known issue
+## Test-only harness
 
-`mockAddCommitment` is commented out in `ZcashPourPool.sol`, which is correct — it is a
-test-only backdoor that lets anyone forge `cm_list` entries and has no business in
-deployed bytecode. But `ZcashPourPour.test.ts` and `ZcashPourBurn.test.ts` still call it,
-so those four tests currently fail. The fix is a test-only harness:
-
-```solidity
-// contracts/test/ZcashPourPoolHarness.sol
-contract ZcashPourPoolHarness is ZcashPourPool {
-    function mockAddCommitment(uint256 _cm) public {
-        indexToCommitment[commitmentIndex] = _cm;
-        commitmentToIndex[_cm] = commitmentIndex;
-        commitmentIndex++;
-    }
-}
-```
-
-Point those two suites at the harness and leave the deploy scripts on `ZcashPourPool`.
+`mockAddCommitment` lives in `contracts/test/ZcashPourPoolHarness.sol`, never in the pool.
+In `ZcashPourPool` it would be a drain, not just a test smell: insert a commitment with no
+deposit behind it, then `burn` it for real ETH. The pour and burn suites deploy the
+harness; the deploy scripts target `ZcashPourPool`, so it can never ship by accident.

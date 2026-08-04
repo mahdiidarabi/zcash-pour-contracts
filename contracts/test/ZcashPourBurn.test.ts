@@ -2,12 +2,12 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
-import { ZcashPourPool } from "../typechain-types";
+import { ZcashPourPoolHarness } from "../typechain-types";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { createGasReporter } from "./helpers/gasReporter";
 
 describe("ZcashPourPool.burn", function () {
-  let zcashPour: ZcashPourPool;
+  let zcashPour: ZcashPourPoolHarness;
   let owner: SignerWithAddress;
   let recipient: SignerWithAddress;
   const gas = createGasReporter("ZcashPourPool.burn");
@@ -52,14 +52,14 @@ describe("ZcashPourPool.burn", function () {
       PoseidonT4.waitForDeployment(),
     ]);
 
-    const ZcashPourFactory = await ethers.getContractFactory("ZcashPourPool", {
+    const ZcashPourFactory = await ethers.getContractFactory("ZcashPourPoolHarness", {
       libraries: {
         "poseidon-solidity/PoseidonT2.sol:PoseidonT2": await PoseidonT2.getAddress(),
         "poseidon-solidity/PoseidonT3.sol:PoseidonT3": await PoseidonT3.getAddress(),
         "poseidon-solidity/PoseidonT4.sol:PoseidonT4": await PoseidonT4.getAddress(),
       },
     });
-    zcashPour = (await ZcashPourFactory.deploy()) as ZcashPourPool;
+    zcashPour = (await ZcashPourFactory.deploy()) as ZcashPourPoolHarness;
     await zcashPour.waitForDeployment();
   });
 

@@ -49,6 +49,19 @@ describe("note tooling <-> ZcashPourPool", function () {
     expect(await pool.commitmentToIndex(note.cm)).to.equal(1n);
   });
 
+  it("rejects minting the same commitment twice", async function () {
+    // Without this guard the second deposit is unrecoverable: one commitment
+    // has one sn_consume, so only one of the two can ever be spent.
+    const note = await createNote(100n);
+    await pool.mint(note.value, note.cm, note.r, note.snProduce, { value: note.value });
+
+    await expect(
+      pool.mint(note.value, note.cm, note.r, note.snProduce, { value: note.value })
+    ).to.be.revertedWith("already committed");
+
+    expect(await pool.totalSupply()).to.equal(note.value);
+  });
+
   it("round-trips mint -> burn and returns the ETH", async function () {
     const note = await createNote(100n);
     await pool.mint(note.value, note.cm, note.r, note.snProduce, { value: note.value });
@@ -109,15 +122,36 @@ describe("note tooling <-> ZcashPourPool", function () {
     });
 
     it("refuses a value the pour circuit could never spend", function () {
-      // 2^32 is the Num2Bits(32) ceiling on pour outputs. Better to fail here
-      // than twenty seconds into proving. docs/protocol.md section 10.
+      // The ceiling is the Num2Bits width in pour_circuit(), mirrored by
+      // circuits/lib/limits.js. Read it from there rather than hardcoding, so
+      // widening the circuit does not silently leave this test asserting the
+      // old bound. Better to fail here than twenty seconds into proving.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { MAX_POUR_VALUE } = require("../../circuits/lib/limits");
+
       expect(() =>
-        execFileSync("node", ["tools/new-note.js", "--value", (2n ** 32n).toString()], {
+        execFileSync("node", ["tools/new-note.js", "--value", MAX_POUR_VALUE.toString()], {
           cwd: CIRCUITS_DIR,
           encoding: "utf8",
           stdio: "pipe",
         })
       ).to.throw();
+    });
+
+    it("allows a real wei amount now the circuit is 128-bit", async function () {
+      // 0.001 ETH -- impossible to pour under the old Num2Bits(32) ceiling.
+      const out = execFileSync("node", ["tools/new-note.js", "--value", "1000000000000000"], {
+        cwd: CIRCUITS_DIR,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      const note = JSON.parse(out);
+
+      await pool.mint(note.mint._value, note.mint._cm, note.mint._r, note.mint._snProduce, {
+        value: note.mint._value,
+      });
+
+      expect(await pool.totalSupply()).to.equal(1000000000000000n);
     });
   });
 });

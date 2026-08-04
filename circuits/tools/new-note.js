@@ -10,18 +10,13 @@ const fs = require("fs");
 const path = require("path");
 const { parseArgs, required } = require("../lib/args");
 const { createNote, toJson } = require("../lib/note");
+const { MAX_POUR_VALUE, POUR_VALUE_BITS } = require("../lib/limits");
 
 const USAGE = `usage: node tools/new-note.js --value <wei> [--name <name>] [--allow-big]
 
   --value      note value in wei
   --name       write to notes/<name>.json instead of stdout
   --allow-big  permit a value the pour circuit cannot spend (see below)`;
-
-// pour() splits v into v1 + v2 and range-checks both with Num2Bits(32), so an
-// output can never reach 2^32. A note at or above that can be minted and burned
-// but never poured -- there is no witness that satisfies the range check.
-// docs/protocol.md section 10.
-const MAX_POURABLE = 2n ** 32n;
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -32,11 +27,11 @@ async function main() {
     process.exit(1);
   }
 
-  if (value >= MAX_POURABLE && !args["allow-big"]) {
+  if (value >= MAX_POUR_VALUE && !args["allow-big"]) {
     console.error(
       `--value ${value} is too big to pour.\n\n` +
-        `pour() range-checks both outputs with Num2Bits(32), so a poured value\n` +
-        `must stay under ${MAX_POURABLE} wei (~4.29 gwei). This note could be\n` +
+        `pour() range-checks both outputs with Num2Bits(${POUR_VALUE_BITS}), so a\n` +
+        `poured value must stay under ${MAX_POUR_VALUE}. This note could be\n` +
         `minted and burned, but never poured.\n\n` +
         `Pass --allow-big if you only need mint and burn.`
     );
@@ -77,7 +72,7 @@ async function main() {
   }
 
   console.error("keep sk secret -- it is the coin");
-  if (value >= MAX_POURABLE) {
+  if (value >= MAX_POUR_VALUE) {
     console.error("warning: not pourable, mint and burn only");
   }
 }

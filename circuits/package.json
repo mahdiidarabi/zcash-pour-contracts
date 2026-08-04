@@ -9,7 +9,10 @@
         "all": "bash scripts/all.sh",
         "clean": "rm -rf build",
         "check": "node tools/check.js",
-        "new-note": "node tools/new-note.js"
+        "new-note": "node tools/new-note.js",
+        "pour-input": "node tools/pour-input.js",
+        "calldata": "node tools/calldata.js",
+        "burn-args": "node tools/burn-args.js"
     },
     "dependencies": {
         "circomlib": "^2.0.5",

@@ -46,20 +46,47 @@ contract ZcashPourPool is ZcashPourVerifier {
         totalSupply += _value;
     }
 
-    // TEST-ONLY: insert a commitment directly so pour()'s cm_list existence checks pass.
-    function mockAddCommitment(uint256 _cm) public {
-        indexToCommitment[commitmentIndex] = _cm;
-        commitmentToIndex[_cm] = commitmentIndex;
-        commitmentIndex++;
-    }
+    // NOTE: the test-only mockAddCommitment lives in
+    // contracts/test/ZcashPourPoolHarness.sol, not here. In the pool it would be
+    // a drain: insert a commitment with no deposit behind it, then burn it for
+    // real ETH.
 
     function pour(uint[2] calldata _pA, uint[2][2] calldata _pB, uint[2] calldata _pC, uint[14] calldata _pubSignals) public {
         require(this.verifyProof(_pA, _pB, _pC, _pubSignals), "invalid proof");
 
+        // Public signal layout, docs/protocol.md section 6:
+        //   [0] cm1   [1] cm2   [2] ok   [3..12] cm_list   [13] sn_consume
         uint256 cm1 = _pubSignals[0];
         uint256 cm2 = _pubSignals[1];
+        uint256 snConsume = _pubSignals[13];
+
+        // Redundant -- ok is hardcoded to 1 in the circuit and every real check
+        // is a constraint, so a bad witness is unprovable rather than ok == 0.
+        // Kept as defence in depth against a future circuit change.
+        require(_pubSignals[2] == 1, "proof valid but wrong result");
+
+        // ---- checks ----
+        //
+        // All of them before any state change. Inserting cm1/cm2 first, as this
+        // used to, let a proof name its own fresh outputs inside cm_list and
+        // still pass the existence checks below.
+        for (uint256 i = 3; i <= 12; i++) {
+            require(commitmentToIndex[_pubSignals[i]] > 0, "cmList not exist");
+        }
+
+        require(snConsumeList[snConsume] == false, "this sn consume already used");
         require(commitmentToIndex[cm1] == 0 && commitmentToIndex[cm2] == 0, "commitment exists");
-        
+
+        // Identical outputs would pass the check above and then insert the same
+        // commitment at two indices, leaving commitmentToIndex pointing at the
+        // second one. Only one of them could ever be spent anyway: same note
+        // means same sn_produce, so same nullifier.
+        require(cm1 != cm2, "duplicate output commitment");
+
+        // ---- effects ----
+        snConsumeList[snConsume] = true;
+        emit SnConsumeSubmitted(snConsume);
+
         indexToCommitment[commitmentIndex] = cm1;
         commitmentToIndex[cm1] = commitmentIndex;
         emit CommitmentSubmitted(commitmentIndex, cm1);
@@ -69,49 +96,6 @@ contract ZcashPourPool is ZcashPourVerifier {
         commitmentToIndex[cm2] = commitmentIndex;
         emit CommitmentSubmitted(commitmentIndex, cm2);
         commitmentIndex++;
-
-        
-
-        uint256 ok = _pubSignals[2];
-        require(ok == 1, "proof valid but wrong result");
-
-        uint256 cmList1 = _pubSignals[3];
-        require(commitmentToIndex[cmList1] > 0, "cmList1 not exist");
-
-        uint256 cmList2 = _pubSignals[4];
-        require(commitmentToIndex[cmList2] > 0, "cmList2 not exist");
-
-        uint256 cmList3 = _pubSignals[5];
-        require(commitmentToIndex[cmList3] > 0, "cmList3 not exist");
-
-        uint256 cmList4 = _pubSignals[6];
-        require(commitmentToIndex[cmList4] > 0, "cmList4 not exist");
-
-        uint256 cmList5 = _pubSignals[7];
-        require(commitmentToIndex[cmList5] > 0, "cmList5 not exist");
-
-        uint256 cmList6 = _pubSignals[8];
-        require(commitmentToIndex[cmList6] > 0, "cmList6 not exist");
-
-        uint256 cmList7 = _pubSignals[9];
-        require(commitmentToIndex[cmList7] > 0, "cmList7 not exist");
-
-        uint256 cmList8 = _pubSignals[10];
-        require(commitmentToIndex[cmList8] > 0, "cmList8 not exist");
-
-        uint256 cmList9 = _pubSignals[11];
-        require(commitmentToIndex[cmList9] > 0, "cmList9 not exist");
-
-        uint256 cmList10 = _pubSignals[12];
-        require(commitmentToIndex[cmList10] > 0, "cmList10 not exist");
-
-        uint256 sn_consme = _pubSignals[13];
-        require(snConsumeList[sn_consme] == false, "this sn consume already used");
-
-        snConsumeList[sn_consme] = true;
-
-        emit SnConsumeSubmitted(sn_consme);
-
     }
 
     // burn is the inverse of mint: it destroys an existing shielded coin and

@@ -98,6 +98,7 @@ There are no dummy notes and no `v == 0` convention.
 ```solidity
 require(msg.value == _value && _value > 0);
 require(posiden3(_r, _snProduce, _value) == _cm);
+require(commitmentToIndex[_cm] == 0);          // "already committed"
 ```
 
 Inserts `_cm` at the next index, bumps `totalSupply` by `_value`, emits
@@ -112,15 +113,20 @@ There is deliberately no proof here: you are creating your own note and paying f
 
 ### 4.2 `pour(pA, pB, pC, pubSignals)` — shielded 1-in / 2-out
 
-Verifies the Groth16 proof, then enforces everything the circuit cannot:
+Verifies the Groth16 proof, then enforces everything the circuit cannot. **All checks run
+before any state change:**
 
 1. `verifyProof(...)` — else `"invalid proof"`
-2. `commitmentToIndex[cm1] == 0 && commitmentToIndex[cm2] == 0` — else `"commitment exists"`
-3. inserts `cm1`, `cm2`, emits two `CommitmentSubmitted`
-4. `ok == 1` — else `"proof valid but wrong result"`
-5. each of `cm_list[0..9]` must already exist (`commitmentToIndex > 0`) — else `"cmListN not exist"`
-6. `snConsumeList[sn_consume] == false` — else `"this sn consume already used"`
+2. `ok == 1` — else `"proof valid but wrong result"`
+3. each of `cm_list[0..9]` must already exist — else `"cmList not exist"`
+4. `snConsumeList[sn_consume] == false` — else `"this sn consume already used"`
+5. `commitmentToIndex[cm1] == 0 && commitmentToIndex[cm2] == 0` — else `"commitment exists"`
+6. `cm1 != cm2` — else `"duplicate output commitment"`
 7. marks the nullifier spent, emits `SnConsumeSubmitted`
+8. inserts `cm1`, `cm2`, emits two `CommitmentSubmitted`
+
+Steps 3 and 8 were once the other way round, which let a proof list its own fresh outputs
+inside `cm_list` and still pass.
 
 No ETH moves. `totalSupply` is untouched, which is correct — value neither enters nor
 leaves the pool.
@@ -166,14 +172,14 @@ accumulator. That is why `n` is 10 and why it is a public input array rather tha
 v2, pk2`.
 
 1. `v === v1 + v2`
-2. `Num2Bits(32)` on `v1` and `v2`
+2. `Num2Bits(128)` on `v1` and `v2`
 3. `cm1 = Poseidon(r1, Poseidon(rho1, pk1), v1)`
 4. `cm2 = Poseidon(r2, Poseidon(rho2, pk2), v2)`
 
 Outputs take `pk`, not `sk`, so you can pay someone else without their secret.
 
 **On balance and overflow.** `v` is not range-checked directly, but it doesn't need to be:
-it is pinned by `v === v1 + v2` with both addends proven to be 32-bit, so `v < 2^33` over
+it is pinned by `v === v1 + v2` with both addends proven to be 128-bit, so `v < 2^129` over
 the integers and the field cannot wrap. `v` is simultaneously pinned to the spent note's
 committed value through `cm_j`. Together those give conservation: you cannot pour out more
 than you poured in. This is the single most important property in the circuit — it
@@ -183,13 +189,13 @@ deserves a dedicated negative test that currently does not exist.
 
 | | |
 |---|---|
-| constraints | 4,420 (2,085 non-linear, 2,335 linear) |
-| wires | 4,438 |
+| constraints | 4,612 (2,277 non-linear, 2,335 linear) |
+| wires | 4,630 |
 | private inputs | 13 |
 | public inputs | 11 |
 | public outputs | 3 |
 
-Powers-of-tau needs `2^k ≥ 4420`, so `k ≥ 13`; the build uses `POWER=16`.
+Powers-of-tau needs `2^k ≥ 4612`, so `k ≥ 13`; the build uses `POWER=16`.
 
 ---
 
@@ -263,39 +269,29 @@ Run `setup` only when the r1cs actually changed.
 ## 9. What is actually enforced
 
 - **Ownership** — spending needs `sk`; `sn_consume` is bound to it (§5.3).
-- **Conservation** — `v == v1 + v2`, both 32-bit, `v` pinned to the spent commitment (§5).
+- **Conservation** — `v == v1 + v2`, both 128-bit, `v` pinned to the spent commitment (§5).
 - **No double-spend** — one nullifier set shared by `pour` and `burn`.
 - **No forged membership** — circuit proves `cm_j ∈ cm_list`; contract proves every
   `cm_list` entry is real.
-- **No commitment collision** — `pour` rejects `cm1`/`cm2` that already exist.
+- **No commitment collision** — `mint` and `pour` both reject a commitment that already
+  exists, and `pour` rejects `cm1 == cm2`.
 
 ---
 
 ## 10. Known gaps
 
-**Values are capped at 2^32 wei.** `Num2Bits(32)` on `v1`/`v2` caps any poured output at
-4,294,967,295 wei ≈ **4.29 gwei**. `mint` accepts any `uint256` and `ZcashPour.test.ts`
-mints 0.001 ETH — about 233,000× the cap. That note can be minted and burned but **can
-never be poured**: no witness satisfies the range check. The working proof uses `v=100`
-wei. Either widen to `Num2Bits(128)` and redo the setup, or denominate notes in something
-coarser than wei. This is the most urgent gap.
+**Values are capped at 2^128 wei.** `Num2Bits(128)` on `v1`/`v2` bounds any poured
+output. That is ~3.4e38 wei against a 120M-ETH supply of ~1.2e26, so it does not bind in
+practice — but `mint` still accepts any `uint256`, so a note above the ceiling can be
+minted and burned yet never poured. `circuits/lib/limits.js` mirrors the width and the
+note tooling refuses such values up front. Do not widen much further: the range checks
+are what keep `v1 + v2` from wrapping the field (§5).
 
 **Anonymity set of 10, prover-chosen, no distinctness check.** Neither circuit nor contract
 requires `cm_list` entries to differ. A prover may pass the same commitment ten times; the
 contract's ten existence checks all pass, and the spent note is then revealed exactly.
 Privacy is opt-in and silently self-defeatable. Enforce distinctness, or replace the list
 with a Merkle root — the linear scan is also why `n` can't grow much.
-
-**`mint` has no duplicate-commitment guard.** `pour` checks `commitmentToIndex[cm] == 0`;
-`mint` does not. Minting an identical `(r, snProduce, value)` twice overwrites the index
-mapping and adds to `totalSupply`, but the note has a single `sn_consume` and can only be
-spent once. The second deposit is unrecoverable. Add the same guard `pour` has.
-
-**`pour` inserts outputs before checking inputs.** `cm1`/`cm2` are written at steps 3, then
-`cm_list` membership is checked at step 5 — so a proof may legally name its own fresh
-outputs inside `cm_list`. Tracing it through: if `cm_j == cm1` then the spent note *is*
-output 1, so `v == v1`, forcing `v2 == 0`. It nets zero and mints nothing. Still, the
-check-after-effect ordering is a wart; move the `cm_list` checks above the inserts.
 
 **No proof binding.** Nothing ties a proof to `msg.sender` or a recipient. A Groth16 proof
 is a bearer token, so anyone can lift one from the mempool and submit it. For `pour` the
@@ -353,12 +349,12 @@ constraints. The rest are MVP scope cuts.
 
 Ordered by how much they block real use:
 
-1. Widen the value range (`Num2Bits(128)`), re-run setup, redeploy.
-2. Duplicate-commitment guard on `mint`.
-3. Reorder `pour`: membership checks before insertion.
+1. ~~Widen the value range to `Num2Bits(128)`~~ — done; setup re-run, verifier re-exported.
+2. ~~Duplicate-commitment guard on `mint`~~ — done.
+3. ~~Reorder `pour`: membership checks before insertion~~ — done, plus a `cm1 != cm2` check.
 4. Distinctness on `cm_list`, or move to a Merkle root with history.
 5. Negative tests: unbalanced `v1 + v2`, overflow attempt, wrong `sk`, tampered `cm_list`.
 6. Bind proofs to a recipient; reserve relayer/fee signals now, not later.
-7. Restore a spend-side test helper — `mockAddCommitment` is commented out, which is why
-   the pour and burn suites currently fail. A test-only harness contract keeps it out of
-   production bytecode.
+7. ~~Restore a spend-side test helper~~ — done; `mockAddCommitment` now lives only in
+   `contracts/test/ZcashPourPoolHarness.sol`. In the pool itself it is a drain: insert a
+   commitment with no deposit behind it, then burn it for real ETH.

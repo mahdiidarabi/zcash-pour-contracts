@@ -43,7 +43,7 @@ is phase 2: circuit-specific, and invalid the moment you edit the circuit. `prov
 to run against a stale zkey rather than failing with a confusing `Invalid proof`.
 
 `power` caps the circuit at `2^power` constraints. 12 is fine for toys; `ZcashPour` has
-4,420 constraints so it needs at least 13, and the build uses 16.
+4,612 constraints so it needs at least 13, and the build uses 16.
 
 > **`npm run setup` produces a new zkey every time, even from an identical circuit** —
 > the phase-2 contribution draws fresh entropy. That changes `delta` in the exported
@@ -55,8 +55,12 @@ to run against a stale zkey rather than failing with a confusing `Invalid proof`
 ## Note tooling
 
 ```bash
-npm run check                                    # JS Poseidon vs the circuit
-node tools/new-note.js --value <wei> [--name <name>] [--allow-big]
+npm run check                            # JS Poseidon vs the circuit
+node tools/new-note.js   --value <wei> [--name <name>] [--allow-big]
+node tools/pour-input.js --note <f> --cm-list <f> --v1 <wei> --pk1 <field> \
+                         --v2 <wei> --pk2 <field> --out <f>
+node tools/calldata.js   [--circuit <name>]
+node tools/burn-args.js  --note <f> --recipient <address>
 ```
 
 ### Making a note
@@ -115,19 +119,17 @@ await pool.burn(note.value, note.r, note.rho, note.sk, recipient);
 
 `msg.value` must equal `_value` exactly, and `_value` must be positive.
 
-### Two limits that decide whether you can pour later
+### Two things that decide whether you can pour later
 
-**Values must stay under 2³².** `pour` splits `v` into `v1 + v2` and range-checks both
-with `Num2Bits(32)`, so a poured value can never reach 4,294,967,296 wei (~4.29 gwei).
-`new-note.js` refuses larger values rather than letting you discover it twenty seconds
-into proving:
+**Values must stay under 2¹²⁸.** `pour` splits `v` into `v1 + v2` and range-checks both
+with `Num2Bits(128)`, the bound that keeps the sum from wrapping the field. It is far
+above any real amount, but `mint` accepts any `uint256`, so the tooling checks it.
+`new-note.js` refuses anything at or above the ceiling rather than letting you discover
+it twenty seconds into proving. `--allow-big` overrides it for notes you only ever intend
+to mint and burn.
 
-```
-$ node tools/new-note.js --value 1000000000000000
---value 1000000000000000 is too big to pour.
-...
-Pass --allow-big if you only need mint and burn.
-```
+The bound lives in one place, `lib/limits.js`. If you change the `Num2Bits` width in
+`pour_circuit()`, change it there too — nothing else hardcodes it.
 
 **The pool needs ten commitments before any pour is possible.** `pour` takes
 `cm_list[10]` and the contract requires every entry to already exist on chain, so one
@@ -142,6 +144,45 @@ done
 Nothing checks that `cm_list` entries are distinct, so you *can* pad with the same
 commitment ten times. It works, and it identifies your spent note exactly — fine for a
 first end-to-end test, useless for privacy. See `../docs/protocol.md` §10.
+
+### Pouring
+
+Spend one note into two. You need ten commitments that already exist in the pool, one of
+which is the note you are spending:
+
+```bash
+node tools/pour-input.js \
+  --note notes/alice.json \
+  --cm-list cmlist.json \
+  --v1 40 --pk1 <recipient pk> \
+  --v2 60 --pk2 <recipient pk> \
+  --out inputs/pour1.json > outputs.json
+
+npm run prove ZcashPour inputs/pour1.json
+node tools/calldata.js > calldata.json
+```
+
+`--out` gets the circom input, which must contain exactly the circuit's input signals.
+**stdout gets the two output notes** — whoever you paid cannot spend theirs without the
+`r` and `rho` chosen here, and the chain only ever sees the commitment. Hand those over
+out of band; combined with their own `sk` they form a spendable note.
+
+`v1 + v2` must equal the spent note's value exactly, and the tool checks it, along with
+the cm_list length, whether your note is actually in the list, and whether the note file
+is self-consistent.
+
+Then `pour(pA, pB, pC, pubSignals)` with the contents of `calldata.json`. `calldata.js`
+exists mainly to get one detail right: snarkjs writes the inner pairs of `pi_b` in the
+opposite order to the Solidity verifier, and getting it wrong just returns false.
+
+### Burning
+
+```bash
+node tools/burn-args.js --note notes/alice.json --recipient 0xabc...
+```
+
+Prints the five `burn()` arguments. Everything it prints ends up in public calldata,
+including `sk` — which links this note to every other note made for the same key.
 
 ## Verifying the tooling
 
