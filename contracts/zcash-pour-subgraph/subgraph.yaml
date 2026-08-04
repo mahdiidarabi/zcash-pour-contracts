@@ -6,7 +6,7 @@ schema:
 dataSources:
   - kind: ethereum
     name: ZcashPourPool
-    network: mainnet
+    network: sepolia
     source:
       address: "0xefa1e06043316BEf1bf614253E4f5A2EF10463b1"
       abi: ZcashPourPool

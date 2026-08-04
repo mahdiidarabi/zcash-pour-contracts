@@ -47,11 +47,11 @@ contract ZcashPourPool is ZcashPourVerifier {
     }
 
     // TEST-ONLY: insert a commitment directly so pour()'s cm_list existence checks pass.
-    // function mockAddCommitment(uint256 _cm) public {
-    //     indexToCommitment[commitmentIndex] = _cm;
-    //     commitmentToIndex[_cm] = commitmentIndex;
-    //     commitmentIndex++;
-    // }
+    function mockAddCommitment(uint256 _cm) public {
+        indexToCommitment[commitmentIndex] = _cm;
+        commitmentToIndex[_cm] = commitmentIndex;
+        commitmentIndex++;
+    }
 
     function pour(uint[2] calldata _pA, uint[2][2] calldata _pB, uint[2] calldata _pC, uint[14] calldata _pubSignals) public {
         require(this.verifyProof(_pA, _pB, _pC, _pubSignals), "invalid proof");

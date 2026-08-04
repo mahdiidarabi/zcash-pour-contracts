@@ -7,10 +7,13 @@
         "prove": "bash scripts/prove.sh",
         "export-verifier": "bash scripts/export-verifier.sh",
         "all": "bash scripts/all.sh",
-        "clean": "rm -rf build"
+        "clean": "rm -rf build",
+        "check": "node tools/check.js",
+        "new-note": "node tools/new-note.js"
     },
     "dependencies": {
         "circomlib": "^2.0.5",
+        "circomlibjs": "^0.1.7",
         "snarkjs": "^0.7.6"
     }
 }
