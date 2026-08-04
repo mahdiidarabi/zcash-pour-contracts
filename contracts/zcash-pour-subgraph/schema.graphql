@@ -1,0 +1,16 @@
+type CommitmentSubmitted @entity(immutable: true) {
+  id: Bytes!
+  commitIndex: BigInt! # uint256
+  commit: BigInt! # uint256
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+type SnConsumeSubmitted @entity(immutable: true) {
+  id: Bytes!
+  snConsume: BigInt! # uint256
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}

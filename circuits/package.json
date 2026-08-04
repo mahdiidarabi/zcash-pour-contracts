@@ -1,0 +1,22 @@
+{
+    "name": "zcash-pour-circuits",
+    "private": true,
+    "scripts": {
+        "compile": "bash scripts/compile.sh",
+        "setup": "bash scripts/setup.sh",
+        "prove": "bash scripts/prove.sh",
+        "export-verifier": "bash scripts/export-verifier.sh",
+        "all": "bash scripts/all.sh",
+        "clean": "rm -rf build",
+        "check": "node tools/check.js",
+        "new-note": "node tools/new-note.js",
+        "pour-input": "node tools/pour-input.js",
+        "calldata": "node tools/calldata.js",
+        "burn-args": "node tools/burn-args.js"
+    },
+    "dependencies": {
+        "circomlib": "^2.0.5",
+        "circomlibjs": "^0.1.7",
+        "snarkjs": "^0.7.6"
+    }
+}

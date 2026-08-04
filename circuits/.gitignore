@@ -1,0 +1,7 @@
+build/
+ptau/
+node_modules/
+
+# Notes hold sk in the clear -- whoever has the file owns the coin.
+# Never commit them.
+notes/*.json

@@ -1,0 +1,42 @@
+{
+  "name": "contracts",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "compile": "hardhat compile",
+    "clean": "hardhat clean",
+    "typechain": "hardhat typechain",
+    "test": "hardhat test",
+    "coverage": "hardhat coverage",
+    "node": "hardhat node",
+    "console:sepolia": "hardhat console --network sepolia",
+    "deploy": "hardhat deploy",
+    "deploy:localhost": "hardhat deploy --network localhost",
+    "deploy:sepolia": "hardhat deploy --network sepolia",
+    "verify:sepolia": "hardhat verify --network sepolia --libraries Libraries.js",
+    "sourcify:sepolia": "hardhat sourcify --network sepolia",
+    "export:sepolia": "hardhat export --network sepolia --export deployments/sepolia.export.json"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@graphprotocol/graph-cli": "^0.98.1",
+    "@graphprotocol/graph-ts": "^0.38.2",
+    "@nomicfoundation/hardhat-toolbox": "^6.1.2",
+    "dotenv": "^17.4.2",
+    "hardhat": "^2.29.0",
+    "hardhat-deploy": "0.14.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "circomlibjs": "^0.1.7",
+    "poseidon-solidity": "^0.0.5",
+    "snarkjs": "^0.7.6"
+  }
+}

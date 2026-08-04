@@ -1,0 +1,29 @@
+specVersion: 1.3.0
+indexerHints:
+  prune: auto
+schema:
+  file: ./schema.graphql
+dataSources:
+  - kind: ethereum
+    name: ZcashPourPool
+    network: sepolia
+    source:
+      address: "0xefa1e06043316BEf1bf614253E4f5A2EF10463b1"
+      abi: ZcashPourPool
+      startBlock: 11411907
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - CommitmentSubmitted
+        - SnConsumeSubmitted
+      abis:
+        - name: ZcashPourPool
+          file: ./abis/ZcashPourPool.json
+      eventHandlers:
+        - event: CommitmentSubmitted(uint256,uint256)
+          handler: handleCommitmentSubmitted
+        - event: SnConsumeSubmitted(uint256)
+          handler: handleSnConsumeSubmitted
+      file: ./src/zcash-pour-pool.ts
