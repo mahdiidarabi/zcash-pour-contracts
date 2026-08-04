@@ -34,6 +34,7 @@ contract ZcashPourPool is ZcashPourVerifier {
         uint256 calculatedCommitment = posiden3(_r, _snProduce, _value);
 
         require(calculatedCommitment == _cm, "wrong commitment");
+        require(commitmentToIndex[_cm] == 0, "already committed");
 
         indexToCommitment[commitmentIndex] = _cm;
         commitmentToIndex[_cm] = commitmentIndex;

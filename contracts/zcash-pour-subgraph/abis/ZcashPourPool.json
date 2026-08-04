@@ -1,0 +1,165 @@
+[
+  { "inputs": [], "stateMutability": "nonpayable", "type": "constructor" },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "commitIndex",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "commit",
+        "type": "uint256"
+      }
+    ],
+    "name": "CommitmentSubmitted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "snConsume",
+        "type": "uint256"
+      }
+    ],
+    "name": "SnConsumeSubmitted",
+    "type": "event"
+  },
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "_value", "type": "uint256" },
+      { "internalType": "uint256", "name": "_r", "type": "uint256" },
+      { "internalType": "uint256", "name": "_rho", "type": "uint256" },
+      { "internalType": "uint256", "name": "_sk", "type": "uint256" },
+      { "internalType": "address", "name": "_recipient", "type": "address" }
+    ],
+    "name": "burn",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "commitmentIndex",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "name": "commitmentToIndex",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "name": "indexToCommitment",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "_value", "type": "uint256" },
+      { "internalType": "uint256", "name": "_cm", "type": "uint256" },
+      { "internalType": "uint256", "name": "_r", "type": "uint256" },
+      { "internalType": "uint256", "name": "_snProduce", "type": "uint256" }
+    ],
+    "name": "mint",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "input1", "type": "uint256" }
+    ],
+    "name": "posiden1",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "pure",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "input1", "type": "uint256" },
+      { "internalType": "uint256", "name": "input2", "type": "uint256" }
+    ],
+    "name": "posiden2",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "pure",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "input1", "type": "uint256" },
+      { "internalType": "uint256", "name": "input2", "type": "uint256" },
+      { "internalType": "uint256", "name": "input3", "type": "uint256" }
+    ],
+    "name": "posiden3",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "pure",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "uint256[2]", "name": "_pA", "type": "uint256[2]" },
+      {
+        "internalType": "uint256[2][2]",
+        "name": "_pB",
+        "type": "uint256[2][2]"
+      },
+      { "internalType": "uint256[2]", "name": "_pC", "type": "uint256[2]" },
+      {
+        "internalType": "uint256[14]",
+        "name": "_pubSignals",
+        "type": "uint256[14]"
+      }
+    ],
+    "name": "pour",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "name": "snConsumeList",
+    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "totalSupply",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "uint256[2]", "name": "_pA", "type": "uint256[2]" },
+      {
+        "internalType": "uint256[2][2]",
+        "name": "_pB",
+        "type": "uint256[2][2]"
+      },
+      { "internalType": "uint256[2]", "name": "_pC", "type": "uint256[2]" },
+      {
+        "internalType": "uint256[14]",
+        "name": "_pubSignals",
+        "type": "uint256[14]"
+      }
+    ],
+    "name": "verifyProof",
+    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]

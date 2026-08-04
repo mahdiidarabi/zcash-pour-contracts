@@ -1,207 +1,364 @@
-# Pour Protocol — Spec & Implementation Plan
+# Pour Protocol — as-built spec
 
-Single source of truth. The circom circuit, the JS reference implementation, and the
-Solidity contracts must all agree with this file. If they disagree, this file is right.
+Describes the system that exists in this repo today: `circuits/circuits/ZcashPour.circom`
+and `contracts/contracts/ZcashPourPool.sol`. Where the circuit and the contract disagree,
+the circuit wins — the contract's job is to enforce what the circuit cannot see.
 
----
-
-## 1. What a pour is
-
-Zcash Sprout's `JoinSplit` consumes up to 2 shielded notes, creates up to 2 shielded
-notes, takes `vPubIn` transparent value in, releases `vPubOut` transparent value out:
-
-```
-v_in[0] + v_in[1] + vPubIn  ==  v_out[0] + v_out[1] + vPubOut
-```
-
-One primitive covers everything:
-
-| Operation | inputs | vPubIn | outputs | vPubOut |
-|---|---|---|---|---|
-| Deposit | 2 dummy | > 0 | 1 real + 1 dummy | 0 |
-| Transfer | 1–2 real | 0 | 1–2 real | 0 |
-| Withdraw | 1–2 real | 0 | 1 change + 1 dummy | > 0 |
-
-No separate deposit/withdraw circuit. That generality is what makes this a pour and
-not a fixed-denomination mixer.
+This is a **pour-shaped** shielded pool, not a Zcash-compatible one, and it is smaller
+than Sprout in ways that matter. §10 is the honest list.
 
 ---
 
-## 2. Field & hash
+## 1. Shape of the system
 
-BN254 scalar field, `p = 21888242871839275222246405745257275088548364400416034343698204186575808495617`.
+A single pool contract holds ETH and a flat set of note commitments. Three operations:
 
-**Poseidon** (circomlib params) everywhere. Zcash uses SHA256 + BLAKE2b; that's ~30k
-constraints per hash vs ~240 for Poseidon, which would put this circuit over a million
-constraints. Deliberate documented deviation — this is *pour-shaped*, not Zcash-compatible.
+| Op | Value flow | Privacy | Proof |
+|---|---|---|---|
+| `mint` | ETH **in**, transparent | none — opening is public | no proof, contract recomputes `cm` |
+| `pour` | none (internal) | shielded, 1-in / 2-out | Groth16 |
+| `burn` | ETH **out**, transparent | none — reveals `sk` | no proof, contract recomputes chain |
 
-Domain separation via a leading constant, mirroring Zcash's tagged PRFs:
-tag `0` = paying key, tag `1` = nullifier. Without it, publishing a nullifier would
-leak the paying key.
+Unlike Sprout's `JoinSplit`, one primitive does *not* cover everything here. Deposit and
+withdrawal are separate transparent functions; only the internal transfer is shielded.
+`pour` moves no ETH at all — it consumes one shielded note and produces two.
+
+```
+mint  ──▶  cm                       (transparent deposit, v revealed)
+           │
+           ▼
+pour  ──▶  cm1 + cm2                (shielded split, v1 + v2 == v, all hidden)
+           │
+           ▼
+burn  ──▶  ETH to recipient         (transparent exit, sk revealed)
+```
+
+---
+
+## 2. Field and hash
+
+BN254 scalar field,
+`p = 21888242871839275222246405745257275088548364400416034343698204186575808495617`.
+
+**Poseidon** (circomlib parameters) everywhere, at three arities:
+
+| Circuit | Solidity | Arity |
+|---|---|---|
+| `Poseidon(1)` | `posiden1` → `PoseidonT2.hash` | 1 |
+| `Poseidon(2)` | `posiden2` → `PoseidonT3.hash` | 2 |
+| `Poseidon(3)` | `posiden3` → `PoseidonT4.hash` | 3 |
+
+The on-chain and in-circuit hashes must agree exactly; `ZcashPourBurn.test.ts` pins this
+with an oracle test that re-derives the proof's `cm` and `sn_consume` through the
+contract's helpers and compares against the circuit's public signals. Keep that test.
+
+**No domain separation.** Every hash is a bare Poseidon call with no tag. Sprout tags its
+PRFs (`0` = paying key, `1` = nullifier) specifically so that publishing a nullifier can't
+leak the paying key. Here the arities differ between the three derivations, which
+separates them in practice, but nothing enforces it structurally. See §10.
 
 ---
 
 ## 3. Note format
 
-Note = `(a_pk, v, rho, r)`.
+A note is `(sk, rho, r, v)`. Everything is a field element; `v` is in **wei**.
 
-| Field | Type | Meaning |
+| Field | Secret? | Meaning |
 |---|---|---|
-| `a_sk` | field | Spending key. Secret, never leaves the client. |
-| `a_pk` | field | `Poseidon(0, a_sk)` |
-| `v` | uint128 | Value in wei |
-| `rho` | field | Nullifier seed, random |
-| `r` | field | Commitment trapdoor, random |
+| `sk` | secret | Spending key. Sole proof of ownership. |
+| `pk` | derived | `Poseidon(sk)` — recipient identifier |
+| `rho` | secret* | Entropy for the note serial |
+| `r` | secret* | Commitment trapdoor |
+| `v` | varies | Value in wei |
+
+\* secret in principle; `mint` publishes both. See §4.1.
+
+The derivation chain — this is the whole protocol:
 
 ```
-cm = Poseidon(a_pk, v, rho, r)      // Merkle leaf
-nf = Poseidon(1, a_sk, rho)         // published on spend, prevents double-spend
+pk          = Poseidon(sk)                        // arity 1
+sn_produce  = Poseidon(rho, pk)                   // arity 2  — note serial
+cm          = Poseidon(r, sn_produce, v)          // arity 3  — the commitment
+sn_consume  = Poseidon(sn_produce, sk)            // arity 2  — the nullifier
 ```
 
-**Dummy notes:** a pour always supplies 2 inputs, but a deposit has none to spend.
-Rule: **`v == 0` means dummy** → skip the Merkle check. The nullifier is still
-published, so sample fresh random `a_sk`/`rho` for every dummy, or you link your
-transactions. (Zcash uses an explicit `enforce` bool; `v == 0` is equivalent and saves
-a signal.)
+`sn_produce` is the note's identity; `sn_consume` is what gets published when it's spent.
+Deriving `sn_consume` requires `sk`, and `sn_produce` already commits to `Poseidon(sk)`,
+so only the holder of `sk` can produce a valid nullifier for a note. That is the entire
+ownership argument.
+
+There are no dummy notes and no `v == 0` convention.
 
 ---
 
-## 4. Merkle tree
+## 4. Operations
 
-Binary, depth **20**, `Poseidon(left, right)`, zero leaf =
-`keccak256("zcash-pour-contracts") % p` hashed up per level. Contract keeps the last
-**30** roots.
+### 4.1 `mint(_value, _cm, _r, _snProduce)` — transparent deposit
 
-Incremental insert: store only the rightmost path (`filledSubtrees`), so an append is
-20 hashes, not a full recompute.
+```solidity
+require(msg.value == _value && _value > 0);
+require(posiden3(_r, _snProduce, _value) == _cm);
+```
 
-Root history exists because proving takes time — someone else's deposit may advance
-the root before your tx lands. Accepting an old root is safe: it only proves membership
-of something already in the tree.
+Inserts `_cm` at the next index, bumps `totalSupply` by `_value`, emits
+`CommitmentSubmitted`.
+
+The caller hands over `_r` and `_snProduce` **in cleartext calldata**. The contract needs
+them only to check that `_cm` is a well-formed commitment to `_value` — but the
+consequence is that a minted note's full opening, minus `sk`, is public from birth.
+Confidentiality of a fresh note rests entirely on `sk`.
+
+There is deliberately no proof here: you are creating your own note and paying for it.
+
+### 4.2 `pour(pA, pB, pC, pubSignals)` — shielded 1-in / 2-out
+
+Verifies the Groth16 proof, then enforces everything the circuit cannot:
+
+1. `verifyProof(...)` — else `"invalid proof"`
+2. `commitmentToIndex[cm1] == 0 && commitmentToIndex[cm2] == 0` — else `"commitment exists"`
+3. inserts `cm1`, `cm2`, emits two `CommitmentSubmitted`
+4. `ok == 1` — else `"proof valid but wrong result"`
+5. each of `cm_list[0..9]` must already exist (`commitmentToIndex > 0`) — else `"cmListN not exist"`
+6. `snConsumeList[sn_consume] == false` — else `"this sn consume already used"`
+7. marks the nullifier spent, emits `SnConsumeSubmitted`
+
+No ETH moves. `totalSupply` is untouched, which is correct — value neither enters nor
+leaves the pool.
+
+Step 5 is what makes the anonymity set real: the circuit proves the spent note is *one of*
+`cm_list`, and the contract proves every member of `cm_list` is a genuine pool commitment.
+Neither check alone is sufficient.
+
+### 4.3 `burn(_value, _r, _rho, _sk, _recipient)` — transparent exit
+
+Re-derives the whole chain on-chain from the revealed secrets, requires the resulting `cm`
+to exist and its `sn_consume` to be unspent, then marks the nullifier, decrements
+`totalSupply`, and sends `_value` to `_recipient`.
+
+Because it consumes **the same nullifier `pour` would**, a note can never be both poured
+and burned. Two tests cover exactly this crossing (`blocks pour after burn`,
+`blocks burn after pour`).
+
+Effects precede the interaction and `totalSupply -= _value` underflow-reverts, so the
+external call is not a reentrancy hole.
 
 ---
 
-## 5. Public signals — order is load-bearing
+## 5. The circuit
 
-snarkjs emits these as a flat array in declaration order; the generated verifier takes
-`uint256[10]`. Reordering silently changes what you're proving.
+`Main(10)` composes two templates.
 
-| # | Signal | Notes |
+**`spending_sn_circuit(n)` — proves the right to spend.** Private: `v, j, r_old, rho,
+sk_old`. Public: `cm_list[n]`, `sn_consume`.
+
+1. `pk_old = Poseidon(sk_old)`
+2. `sn_produce = Poseidon(rho, pk_old)`
+3. `Poseidon(sn_produce, sk_old) === sn_consume` — binds the published nullifier to `sk`
+4. `cm_j = Poseidon(r_old, sn_produce, v)`
+5. selects `cm_list[j]` by summing `IsEqual(j, i) * cm_list[i]` over `i`, asserts it equals `cm_j`
+6. `LessThan(10)` range-checks `j < n`
+7. `ok <== 1`
+
+Membership is a **linear scan**, not a Merkle proof: `n` equality gadgets and an
+accumulator. That is why `n` is 10 and why it is a public input array rather than a root.
+
+**`pour_circuit()` — proves the split is honest.** Private: `r1, rho1, v1, pk1, r2, rho2,
+v2, pk2`.
+
+1. `v === v1 + v2`
+2. `Num2Bits(32)` on `v1` and `v2`
+3. `cm1 = Poseidon(r1, Poseidon(rho1, pk1), v1)`
+4. `cm2 = Poseidon(r2, Poseidon(rho2, pk2), v2)`
+
+Outputs take `pk`, not `sk`, so you can pay someone else without their secret.
+
+**On balance and overflow.** `v` is not range-checked directly, but it doesn't need to be:
+it is pinned by `v === v1 + v2` with both addends proven to be 32-bit, so `v < 2^33` over
+the integers and the field cannot wrap. `v` is simultaneously pinned to the spent note's
+committed value through `cm_j`. Together those give conservation: you cannot pour out more
+than you poured in. This is the single most important property in the circuit — it
+deserves a dedicated negative test that currently does not exist.
+
+**Size** (from `snarkjs r1cs info`):
+
+| | |
+|---|---|
+| constraints | 4,420 (2,085 non-linear, 2,335 linear) |
+| wires | 4,438 |
+| private inputs | 13 |
+| public inputs | 11 |
+| public outputs | 3 |
+
+Powers-of-tau needs `2^k ≥ 4420`, so `k ≥ 13`; the build uses `POWER=16`.
+
+---
+
+## 6. Public signals — order is load-bearing
+
+circom emits outputs first in declaration order, then public inputs. The generated
+verifier takes `uint[14]`, and `ZcashPourPool.pour` indexes it positionally. Reorder
+anything in `Main` and the contract silently reads the wrong slots.
+
+| # | Signal | Checked by the contract |
 |---|---|---|
-| 0 | `root` | must be in root history |
-| 1 | `nullifier[0]` | rejected if spent |
-| 2 | `nullifier[1]` | rejected if spent |
-| 3 | `commitment[0]` | inserted into tree |
-| 4 | `commitment[1]` | inserted into tree |
-| 5 | `vPubIn` | must equal `msg.value` |
-| 6 | `vPubOut` | paid to `recipient` |
-| 7 | `recipient` | address as field element |
-| 8 | `relayer` | zero if self-relayed |
-| 9 | `fee` | paid to relayer, taken from `vPubOut` |
+| 0 | `cm1` | must not already exist; inserted |
+| 1 | `cm2` | must not already exist; inserted |
+| 2 | `ok` | `== 1` |
+| 3–12 | `cm_list[0..9]` | each must already exist |
+| 13 | `sn_consume` | must be unspent; marked spent |
 
-`recipient`/`relayer`/`fee` feed no real constraint — they exist to *bind* the proof.
-Without them a Groth16 proof is a bearer token and anyone can front-run your withdrawal
-from the mempool with a different recipient. circom eliminates unconstrained signals, so
-each needs a dummy constraint (`x * x === xSquared`). Same trick Tornado uses.
+`ok` is hardcoded `ok <== 1` inside the template — it is not the result of any test. Every
+real check is a `===` constraint, which makes an invalid witness *unprovable* rather than
+producing `ok = 0`. The contract's `require(ok == 1)` is therefore redundant. Harmless, but
+don't mistake it for a safety net.
 
-Relayer/fee ship unused in the MVP but must exist from day one — adding a public signal
-later means new circuit, new setup, new verifier, migration.
+Proof formatting: snarkjs's Solidity calldata **swaps the inner pairs of `pi_b`**. Both
+proof-consuming tests do this; getting it wrong fails verification with no useful error.
 
 ---
 
-## 6. The pour statement
+## 7. On-chain state
 
-Private witness: per input `a_sk, v, rho, r, pathElements[20], pathIndices[20]`;
-per output `a_pk, v, rho, r`.
+```solidity
+mapping(uint256 => uint256) indexToCommitment;   // index → cm
+mapping(uint256 => uint256) commitmentToIndex;   // cm → index  (0 means absent)
+mapping(uint256 => bool)    snConsumeList;       // nullifier → spent
+uint256 totalSupply;                             // wei held on behalf of notes
+uint256 commitmentIndex;                         // next free index, starts at 1
+```
 
-**Per input i:**
-1. `a_pk_i = Poseidon(0, a_sk_i)` — you know the spending key
-2. `cm_i = Poseidon(a_pk_i, v_i, rho_i, r_i)`
-3. `nullifier[i] = Poseidon(1, a_sk_i, rho_i)`
-4. if `v_i != 0`: `MerkleProof(cm_i, path_i) == root`
+`commitmentIndex` starts at **1** so that `commitmentToIndex[x] == 0` unambiguously means
+"not present". Every existence check in `pour` depends on that.
 
-**Per output j:** `commitment[j] = Poseidon(a_pk_j, v_j, rho_j, r_j)`
-(takes `a_pk`, not `a_sk` — you create notes for others without their secrets)
-
-**Balance:** the equation in §1, plus `Num2Bits(128)` on all six value signals.
-
-> The range checks are the single most important constraint. Field arithmetic is
-> modular: without them a prover sets an output to `p - 1`, the sum "balances", and
-> value is minted from nothing. Bounded by 2^128 each, the sum can't exceed 2^130 << p,
-> so it holds over the integers. Give this a dedicated negative test.
+There is no Merkle tree and no root history. Membership is proven by naming ten
+commitments explicitly and having the contract look each one up.
 
 ---
 
-## 7. Implementation plan
+## 8. Artifact coupling
 
-Build in this order. Each phase is testable before the next one starts.
+Three artifacts must agree, and nothing at runtime checks that they do:
 
-### Phase 1 — JS reference implementation `circuits/src/`
-- [ ] `note.ts` — `Note` type, `randomNote()`, `randomFieldElement()`, `commitment()`, `nullifier()`, `derivePk()`
-- [ ] `merkle.ts` — off-chain incremental tree: `insert()`, `root()`, `proof(index)`, precomputed zero values
-- [ ] `pour.ts` — assemble circuit input JSON from 2 in-notes + 2 out-notes + public params
-- [ ] tests for all three
+```
+ZcashPour.r1cs ──▶ ZcashPour_final.zkey ──▶ ZcashPourVerifier.sol
+                            │
+                            └──▶ proof.json / public.json
+```
 
-Do this **first**. It's the oracle every later phase is checked against, and it's pure
-JS — fast to iterate. Getting the note encoding wrong here poisons everything downstream.
+- Recompiling the circuit invalidates the zkey. `prove.sh` catches this via
+  `build/<C>/.r1cs.sha256`.
+- Re-running `setup` produces a **new zkey even from an identical r1cs** — the phase-2
+  contribution draws fresh entropy — which changes `delta` in the verifier and invalidates
+  every previously generated proof. Nothing catches this; the symptom is `pour` reverting
+  with `"invalid proof"` while the circuit is unchanged.
+- The exported verifier carries `r1cs:` and `zkey:` sha256 in its header banner. Compare
+  those before debugging anything else.
+- **A deployed pool embeds the verifier's `delta`.** Re-running `setup` means redeploy, not
+  just re-verify.
 
-### Phase 2 — circuit primitives `circuits/circuits/lib/`
-- [ ] `note.circom` — `NoteCommitment`, `Nullifier`, `DerivePk` templates
-- [ ] `merkle.circom` — `MerkleProof(depth)`, using `DualMux` for path ordering
-- [ ] Tests asserting circuit output **== JS output** on random inputs
-
-The cross-check against Phase 1 is the point. Don't skip it.
-
-### Phase 3 — top-level circuit `circuits/circuits/pour.circom`
-- [ ] `Spend` template: one input note — pk derivation, commitment, nullifier, conditional Merkle check
-- [ ] `Pour(depth)`: 2 spends, 2 output commitments, balance, range checks, dummy constraints for recipient/relayer/fee
-- [ ] Happy-path tests: deposit, transfer, withdraw
-- [ ] Negative tests: wrong `a_sk`, tampered Merkle path, unbalanced values, **overflow attempt (§6)**, spent-note reuse
-
-### Phase 4 — build pipeline
-- [ ] `npm run compile` → r1cs/wasm/sym, note the constraint count
-- [ ] `npm run setup` → ptau download + groth16 setup + contribution
-- [ ] `npm run export-verifier` → `contracts/contracts/verifiers/PourVerifier.sol`
-
-Scripts are already written. Mostly you just run them.
-
-### Phase 5 — contracts `contracts/contracts/`
-- [ ] `MerkleTreeWithHistory.sol` — incremental tree + 30-root ring buffer
-- [ ] Test: on-chain root **== JS root** after the same inserts (first real integration proof)
-- [ ] `ZcashPour.sol` — `pour()`: verify proof, check root known, check nullifiers unspent, mark spent, insert commitments, handle `msg.value`/payout/fee, emit events
-- [ ] Attack tests: double-spend, unknown root, `msg.value != vPubIn`, `fee > vPubOut`, replay with swapped recipient
-
-**Watch out:** on-chain Poseidon must match circomlib exactly. `poseidon-solidity` is
-wired in — verify it against your JS impl in the very first contract test.
-
-### Phase 6 — end-to-end
-- [ ] Test that generates a **real proof** with snarkjs and lands a **real transaction**
-- [ ] Full cycle: deposit → transfer → partial withdraw
-
-### Phase 7 — ship
-- [ ] Deploy to Sepolia, record addresses in `deployments/sepolia.json`
-- [ ] Verify contracts on Etherscan
-- [ ] CLI so someone else can actually use it
-- [ ] README with the numbers: constraint count, proving time, gas per op
+Run `setup` only when the r1cs actually changed.
 
 ---
 
-## 8. Known limitations (say these out loud in interviews)
+## 9. What is actually enforced
 
-**Trusted setup.** Groth16 needs a circuit-specific ceremony. MVP uses one
-contributor; whoever holds the toxic waste could mint unlimited value. Production needs
-MPC.
+- **Ownership** — spending needs `sk`; `sn_consume` is bound to it (§5.3).
+- **Conservation** — `v == v1 + v2`, both 32-bit, `v` pinned to the spent commitment (§5).
+- **No double-spend** — one nullifier set shared by `pour` and `burn`.
+- **No forged membership** — circuit proves `cm_j ∈ cm_list`; contract proves every
+  `cm_list` entry is real.
+- **No commitment collision** — `pour` rejects `cm1`/`cm2` that already exist.
 
-**No `rho` derivation.** Zcash derives output `rho` from `h_sig` (unique per tx); we
-sample randomly. Reintroduces weak *Faerie Gold*: a malicious sender making two notes
-for you with the same `rho` gives them the same nullifier, so you can only spend one.
-Burns their money, not yours. Tracked as follow-up.
+---
 
-**Anonymity set.** Privacy scales with pool size. On testnet with a handful of users,
-timing and value correlation deanonymise nearly everything regardless of the crypto.
+## 10. Known gaps
 
-**No note encryption on-chain.** Note data goes to the recipient out of band as JSON.
-Zcash puts encrypted ciphertexts in the tx so recipients can scan with a viewing key.
-Out of scope.
+**Values are capped at 2^32 wei.** `Num2Bits(32)` on `v1`/`v2` caps any poured output at
+4,294,967,295 wei ≈ **4.29 gwei**. `mint` accepts any `uint256` and `ZcashPour.test.ts`
+mints 0.001 ETH — about 233,000× the cap. That note can be minted and burned but **can
+never be poured**: no witness satisfies the range check. The working proof uses `v=100`
+wei. Either widen to `Num2Bits(128)` and redo the setup, or denominate notes in something
+coarser than wei. This is the most urgent gap.
+
+**Anonymity set of 10, prover-chosen, no distinctness check.** Neither circuit nor contract
+requires `cm_list` entries to differ. A prover may pass the same commitment ten times; the
+contract's ten existence checks all pass, and the spent note is then revealed exactly.
+Privacy is opt-in and silently self-defeatable. Enforce distinctness, or replace the list
+with a Merkle root — the linear scan is also why `n` can't grow much.
+
+**`mint` has no duplicate-commitment guard.** `pour` checks `commitmentToIndex[cm] == 0`;
+`mint` does not. Minting an identical `(r, snProduce, value)` twice overwrites the index
+mapping and adds to `totalSupply`, but the note has a single `sn_consume` and can only be
+spent once. The second deposit is unrecoverable. Add the same guard `pour` has.
+
+**`pour` inserts outputs before checking inputs.** `cm1`/`cm2` are written at steps 3, then
+`cm_list` membership is checked at step 5 — so a proof may legally name its own fresh
+outputs inside `cm_list`. Tracing it through: if `cm_j == cm1` then the spent note *is*
+output 1, so `v == v1`, forcing `v2 == 0`. It nets zero and mints nothing. Still, the
+check-after-effect ordering is a wart; move the `cm_list` checks above the inserts.
+
+**No proof binding.** Nothing ties a proof to `msg.sender` or a recipient. A Groth16 proof
+is a bearer token, so anyone can lift one from the mempool and submit it. For `pour` the
+damage is limited to griefing — the front-runner creates the same commitments and the
+original tx then reverts with `"commitment exists"` — but the pattern is wrong, and any
+future value-bearing public signal (recipient, relayer, fee) must be added *before* launch:
+a new public signal means new circuit, new setup, new verifier, redeploy.
+
+**`burn` reveals `sk`.** It publishes `value, r, rho, sk` in calldata. `sk` is the identity
+behind `pk`, so burning one note retroactively links every other note ever created for that
+`pk` and forward-links any future one. Treat `sk` as single-use, or derive per-note keys.
+
+**No domain separation.** See §2. Distinct arities are doing the work that explicit tags
+should do.
+
+**Trusted setup.** Single-contributor Groth16 ceremony. Whoever holds the toxic waste can
+forge proofs and mint unlimited value. Fine for testnet, disqualifying for real value.
+
+**No `rho` derivation.** Sprout derives output `rho` from a per-transaction `h_sig`; we
+sample it randomly. Reintroduces weak *Faerie Gold*: a sender who makes you two notes with
+the same `rho` and `pk` gives them the same nullifier, so only one is spendable. Burns
+their money, not yours.
+
+**No note encryption.** Note data reaches the recipient out of band. There is no on-chain
+ciphertext and no viewing key, so there is no way to scan for notes paid to you.
+
+**Unexplained: invalid proofs are expensive.** The gas table records `pour (invalid proof)`
+at 16,259,887 gas against 447,664 for the success path. The generated verifier returns
+`false` cleanly with no `invalid()` opcode, so the cause is not obvious and I have not
+traced it. It matters for relayer economics and DoS surface — worth understanding before
+anyone else can submit proofs.
 
 **Not audited. Testnet only.**
+
+---
+
+## 11. Divergence from Zcash Sprout
+
+| Sprout | Here |
+|---|---|
+| SHA256 / BLAKE2b | Poseidon (~240 constraints vs ~30k) |
+| Merkle tree, depth 29, root history | flat set + public `cm_list[10]`, linear scan |
+| 2-in / 2-out with dummy notes | 1-in / 2-out, no dummies |
+| `vPubIn` / `vPubOut` in one circuit | separate transparent `mint` / `burn` |
+| tagged PRFs | untagged Poseidon at differing arities |
+| `rho` from `h_sig` | random `rho` |
+| encrypted note ciphertexts on-chain | out-of-band |
+
+The hash swap is the deliberate one — a faithful Sprout circuit would exceed a million
+constraints. The rest are MVP scope cuts.
+
+---
+
+## 12. Next
+
+Ordered by how much they block real use:
+
+1. Widen the value range (`Num2Bits(128)`), re-run setup, redeploy.
+2. Duplicate-commitment guard on `mint`.
+3. Reorder `pour`: membership checks before insertion.
+4. Distinctness on `cm_list`, or move to a Merkle root with history.
+5. Negative tests: unbalanced `v1 + v2`, overflow attempt, wrong `sk`, tampered `cm_list`.
+6. Bind proofs to a recipient; reserve relayer/fee signals now, not later.
+7. Restore a spend-side test helper — `mockAddCommitment` is commented out, which is why
+   the pour and burn suites currently fail. A test-only harness contract keeps it out of
+   production bytecode.
