@@ -7,7 +7,7 @@
 // note.test.ts pins the two implementations together against the circuit's own
 // committed vector. If they ever drift, that test fails.
 
-import { buildPoseidonReference } from "circomlibjs";
+import * as circomlibjs from "circomlibjs";
 
 // BN254 scalar field.
 export const P =
@@ -64,7 +64,22 @@ let poseidon: any = null;
 // Constants are generated on first use, so do it once.
 async function hashes() {
   if (poseidon === null) {
-    poseidon = await buildPoseidonReference();
+    // Resolved at runtime, not via a named import. Bundlers disagree about how
+    // to expose circomlibjs's CommonJS exports: some give the namespace
+    // directly, some nest it under .default. A named import that comes back
+    // undefined fails as "<minified name> is not a function", which tells you
+    // nothing. Check it here and say what actually went wrong.
+    const mod = ((circomlibjs as any).default ?? circomlibjs) as Record<string, unknown>;
+    const build = mod.buildPoseidonReference ?? mod.buildPoseidon;
+
+    if (typeof build !== "function") {
+      throw new Error(
+        `circomlibjs did not expose a Poseidon builder (got ${typeof build}). ` +
+          `This is a bundling problem, not a cryptography one.`
+      );
+    }
+
+    poseidon = await (build as () => Promise<unknown>)();
   }
 
   const h = (inputs: bigint[]): bigint => BigInt(poseidon.F.toString(poseidon(inputs)));
