@@ -1,8 +1,8 @@
 {
   "sepolia": {
     "ZcashPourPool": {
-      "address": "0xefa1e06043316BEf1bf614253E4f5A2EF10463b1",
-      "startBlock": 11411907
+      "address": "0xd21b3Fbb1cDF199140f233e41C31a7507D6a1AeE",
+      "startBlock": 11417986
     }
   }
 }

@@ -1,16 +1,165 @@
-type CommitmentSubmitted @entity(immutable: true) {
-  id: Bytes!
-  commitIndex: BigInt! # uint256
-  commit: BigInt! # uint256
+# Entities for the ZcashPourPool subgraph.
+#
+# Three on-chain events back all of this:
+#   Minted(value, commit, r, snProduce, commitIndex, submitter)
+#   Poured(commit, commitIndex, submitter)              -- emitted TWICE per pour
+#   CommitBurnt(snConsume, submitter, isBurnt)          -- isBurnt distinguishes burn from pour
+#
+# See ../../docs/protocol.md for what the values mean.
+
+# Who submitted the transaction. Note this is msg.sender, not necessarily the
+# owner of the notes: a Groth16 proof is a bearer token, so anyone can relay a
+# pour. For burn it is also not the recipient -- burn() takes a separate
+# _recipient that the event does not carry.
+type User @entity(immutable: false) {
+  id: Bytes! # the address
+  address: Bytes!
+
+  mints: [Mint!]! @derivedFrom(field: "submitter")
+  pours: [Pour!]! @derivedFrom(field: "submitter")
+  burns: [Burn!]! @derivedFrom(field: "submitter")
+
+  # Running counts, so a caller does not have to page the whole list to get them.
+  mintCount: BigInt!
+  pourCount: BigInt!
+  burnCount: BigInt!
+
+  # Only mint and burn move ETH; pour is value-neutral.
+  totalMinted: BigInt!
+  totalBurned: BigInt!
+
+  firstSeenAt: BigInt!
+  lastSeenAt: BigInt!
+}
+
+# A commitment enters the pool either as a deposit (mint) or as one of the two
+# outputs of a pour. Exactly one of `mint` / `pour` is set; `source` says which,
+# so you can filter without null checks.
+enum CommitmentSource {
+  MINT
+  POUR
+}
+
+type Commitment @entity(immutable: true) {
+  id: Bytes! # the commitment value as bytes
+  commit: BigInt!
+  index: BigInt! # commitmentIndex it was stored at, 1-based
+
+  source: CommitmentSource!
+  mint: Mint
+  pour: Pour
+
+  # Set only for mints: pour keeps the opening private, by design.
+  # value: BigInt
+  # r: BigInt
+  # snProduce: BigInt
+
+  submitter: User!
   blockNumber: BigInt!
   blockTimestamp: BigInt!
   transactionHash: Bytes!
 }
 
-type SnConsumeSubmitted @entity(immutable: true) {
-  id: Bytes!
-  snConsume: BigInt! # uint256
+# The nullifier published when a note is spent -- sn_consume in the protocol doc.
+# Its presence is the only public evidence a note was consumed; which note it
+# was stays hidden.
+enum NullifierSource {
+  POUR
+  BURN
+}
+
+type Nullifier @entity(immutable: true) {
+  id: Bytes! # the snConsume value as bytes
+  snConsume: BigInt!
+
+  source: NullifierSource!
+  pour: Pour
+  burn: Burn
+
+  submitter: User!
   blockNumber: BigInt!
   blockTimestamp: BigInt!
   transactionHash: Bytes!
+}
+
+# A transparent deposit. Everything except sk is public here.
+type Mint @entity(immutable: true) {
+  id: Bytes! # tx hash + log index
+  value: BigInt!
+  commit: BigInt!
+  r: BigInt!
+  snProduce: BigInt!
+  commitIndex: BigInt!
+
+  commitment: Commitment!
+  submitter: User!
+
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+# One shielded spend: one note in, two out.
+#
+# Mutable and keyed by transaction hash because it is assembled from three
+# events -- one CommitBurnt and two Poured -- which arrive as separate handler
+# calls. `commitments` fills to two entries; `nullifier` is set by the
+# CommitBurnt handler.
+#
+# There is no value here on purpose. The amounts are exactly what the proof
+# hides.
+type Pour @entity(immutable: false) {
+  id: Bytes! # tx hash
+
+  commitments: [Commitment!]! @derivedFrom(field: "pour")
+  nullifier: Nullifier
+
+  submitter: User!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+# A transparent exit.
+#
+# NOTE: CommitBurnt(snConsume, submitter, isBurnt) carries neither the value nor
+# the recipient, even though burn() makes both public in calldata. So `value`
+# and `recipient` cannot be filled from events alone and are omitted rather than
+# left permanently null. See the note in the next step.
+type Burn @entity(immutable: true) {
+  id: Bytes! # tx hash + log index
+  snConsume: BigInt!
+
+  # Recovered by decoding the transaction calldata, since the event does not
+  # carry them. Null when burn() was not the top-level call of the transaction
+  # -- event.transaction.input is the outer call's data, so a burn routed
+  # through another contract decodes to nothing. Widen CommitBurnt and these
+  # become unconditional.
+  value: BigInt
+  recipient: Bytes
+
+  nullifier: Nullifier!
+  submitter: User!
+
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+# Singleton, id "pool". Cheap totals plus the counter a client needs to know how
+# many commitments exist before assembling a cm_list.
+type Pool @entity(immutable: false) {
+  id: Bytes!
+
+  commitmentCount: BigInt!
+  nullifierCount: BigInt!
+  mintCount: BigInt!
+  pourCount: BigInt!
+  burnCount: BigInt!
+
+  # Mirrors the contract's totalSupply: mints add, burns subtract, pours do not
+  # move it.
+  totalSupply: BigInt!
+
+  lastUpdatedAt: BigInt!
 }
