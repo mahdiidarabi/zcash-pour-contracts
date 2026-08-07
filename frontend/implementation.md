@@ -1,6 +1,9 @@
 # Frontend — implementation plan
 
-Not approved yet. Read, argue, then I build.
+The plan this was built from, kept as a record of what was decided and why. It is
+**built and deployed** — [zcash-pour-contracts.vercel.app](https://zcash-pour-contracts.vercel.app/).
+Where it disagrees with the code, the code won; `README.md` describes what actually
+shipped.
 
 ## What this is for
 
