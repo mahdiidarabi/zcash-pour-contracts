@@ -1,0 +1,18 @@
+{
+  "syncedAt": "2026-08-07T07:58:49.091Z",
+  "files": {
+    "ZcashPour.wasm": {
+      "sha256": "a38fd9ef0eb1dc2401a7608f47fbc6ec9d93f0b6ca1093b34b91178bf3b50ffd",
+      "bytes": 2406496
+    },
+    "ZcashPour.zkey": {
+      "sha256": "e7404d8ca8a392fcf0612dd458b9c4ba69cc02e736ce92ad1bea0bd949a6bf00",
+      "bytes": 2219958
+    },
+    "verification_key.json": {
+      "sha256": "e9885f923aede70274d50d41a05837a3f3f8ea76160da606e8f253b8e7344039",
+      "bytes": 5307
+    }
+  },
+  "verifierZkeySha256": "e7404d8ca8a392fcf0612dd458b9c4ba69cc02e736ce92ad1bea0bd949a6bf00"
+}
