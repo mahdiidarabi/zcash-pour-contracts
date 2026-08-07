@@ -19,7 +19,13 @@ test/
 ├── ZcashPourNotes.test.ts     # the circuits/ note tooling, end to end
 └── helpers/gasReporter.ts
 Libraries.js                   # library addresses for `hardhat verify`
+zcash-pour-subgraph/           # The Graph subgraph over the pool's events
 ```
+
+The subgraph indexes `Minted`, `Poured` and `CommitBurnt` into commitments, nullifiers and
+per-address activity. It is what the frontend queries to assemble a `cm_list`, and it is
+deployed to Subgraph Studio — see its `subgraph.yaml` for the address and start block it
+tracks.
 
 `mint` shields ETH into a commitment, `pour` spends a note into two new ones behind a
 proof, `burn` unshields back to an address.

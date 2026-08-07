@@ -1,5 +1,7 @@
 # frontend
 
+### ▸ [Live at zcash-pour-contracts.vercel.app](https://zcash-pour-contracts.vercel.app/)
+
 A single-page demo of the pour pool. Generates notes, builds a **Groth16 proof in the
 browser**, and sends the result to the contract on Sepolia. No backend — keys are created
 in the tab and never leave it.
@@ -16,14 +18,18 @@ npm run dev            # http://localhost:5173
 ```
 
 ```bash
-npm test               # note derivation + a real proof, in node
+npm test               # source tests: derivation, a real proof, node-global handling
+npm run verify         # build, then all tests INCLUDING the production bundle
 npm run build          # typecheck + production build to dist/
 npm run preview        # serve dist/ locally
 ```
 
-`npm test` is the one to run before trusting anything: it proves a witness built by the
-browser's own `note.ts` and checks the result verifies, so a broken derivation shows up in
-about a second instead of as a failed transaction.
+**Use `npm run verify` before deploying.** Plain `npm test` only exercises `src/`, and this
+project has already shipped two bugs that were invisible there: Vite's dev pipeline and its
+Rollup production pipeline resolve CommonJS dependencies differently, and only the latter
+minifies. `src/dist.test.ts` loads the actual built chunk in jsdom and derives a note from
+it. It skips with a warning if `dist/` is absent, so `npm test` still works on a fresh
+clone.
 
 ## What talks to what
 
@@ -103,8 +109,13 @@ src/
 ├── note.ts       field, Poseidon, note derivation   (port of circuits/lib)
 ├── note.test.ts  pins that port to the circuit's committed vector
 ├── prover.ts     snarkjs fullProve + Solidity calldata
+├── prover.test.ts  builds a witness and proves it, for real
+├── dist.test.ts  loads the BUILT bundle and derives a note from it
 ├── manifest.ts   stale-artefact check (kept apart so it does not pull in snarkjs)
 ├── chain.ts      wallet connect, contract, error unwrapping
+├── subgraph.ts   the GraphQL queries
+├── polyfills.ts  Buffer and process, which Vite does not shim
+├── shims/        browser stand-in for node's assert
 ├── ui.ts         DOM helpers, wei/ETH formatting
 └── screens/      one file per tab
 ```
@@ -114,17 +125,35 @@ and takes randomness from `node:crypto`, so bundling it would mean polyfilling m
 the file is long. `note.test.ts` asserts the two agree on the circuit's own vector, so
 drift fails a test rather than a transaction.
 
+## Two things that will bite you
+
+**`circomlibjs` imports Node's `assert`.** There is no such module in a browser, and a
+bundler will quietly resolve it to an empty object — Poseidon then calls it and dies with
+`<minified name> is not a function`, pointing at nothing. Worse, whether you get the stub
+or a real implementation depended on what happened to be in `node_modules` at build time,
+so the same commit built differently on different machines. `vite.config.ts` aliases
+`assert` to `src/shims/assert.ts` to make it deterministic.
+
+**Poseidon must be `buildPoseidonReference`, not `buildPoseidon`.** The latter goes through
+ffjavascript's wasm/worker builder, which never comes up in a browser — the UI just hangs.
+The reference implementation is pure JS and produces byte-identical output, which
+`note.test.ts` verifies against the circuit's vector.
+
+Both are the reason `dist.test.ts` exists.
+
 ## Bundle
 
 The crypto is loaded on demand, not at first paint:
 
 ```
-index.js    268 kB   (100 kB gzip)   shell, ethers, screens
-note.js   2,966 kB (1,403 kB gzip)   circomlibjs -> ffjavascript, on first note
+index.js       32 kB  (10 kB gzip)   shell, router, polyfills
+ui.js         259 kB  (97 kB gzip)   ethers, on wallet use
+snarkjs.js    280 kB  (59 kB gzip)   only when someone pours
+note.js     2,870 kB (1.4 MB gzip)   circomlibjs -> ffjavascript, on first note
 ```
 
-`snarkjs` is a further dynamic import inside `prover.ts`, so it only arrives when someone
-actually pours. Most of the weight is `ffjavascript`, shared by both.
+Screens are each a few kB and lazily routed. Most of the weight is `ffjavascript`, shared
+between circomlibjs and snarkjs.
 
 ## Deploying to Vercel
 
