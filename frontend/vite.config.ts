@@ -1,6 +1,14 @@
+import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      // circomlibjs imports Node's assert. Without this the bundler stubs it as
+      // an empty object and Poseidon dies with "x is not a function".
+      assert: fileURLToPath(new URL("./src/shims/assert.ts", import.meta.url)),
+    },
+  },
   // snarkjs and circomlibjs are CommonJS with node-shaped deps; pre-bundling
   // them lets esbuild resolve that once instead of at every reload.
   optimizeDeps: { include: ["snarkjs", "circomlibjs", "ethers"] },

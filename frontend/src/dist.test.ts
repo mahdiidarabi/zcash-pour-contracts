@@ -11,7 +11,7 @@
 // Requires `npm run build` first; skips loudly rather than silently passing.
 
 import { beforeAll, describe, expect, it } from "vitest";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync as read, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 
@@ -32,6 +32,30 @@ describe("production bundle", () => {
     // The note chunk imports the entry chunk, so main.ts runs on import and
     // expects its mount point. In a browser the entry has already loaded.
     document.body.innerHTML = '<div id="app"></div>';
+
+    // Importing the built chunk pulls in the entry, which runs main.ts and
+    // fetches /circuit/manifest.json. There is no server here, so serve the
+    // real files off disk instead -- otherwise the rejected fetch surfaces as
+    // an unhandled error and vitest exits non-zero even though every test
+    // passed.
+    const publicDir = join(__dirname, "..", "public");
+    (globalThis as any).fetch = async (input: any) => {
+      const path = String(input?.url ?? input).replace(/^https?:\/\/[^/]+/, "");
+      const file = join(publicDir, path);
+
+      if (!existsSync(file)) {
+        return { ok: false, status: 404, json: async () => ({}), text: async () => "" };
+      }
+
+      const body = read(file);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => JSON.parse(body.toString("utf8")),
+        text: async () => body.toString("utf8"),
+        arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+      };
+    };
 
     if (!(globalThis as any).Worker) {
       (globalThis as any).Worker = class {
