@@ -19,10 +19,10 @@ contract ZcashPourPool is ZcashPourVerifier {
     uint256 public totalSupply;
     uint256 public commitmentIndex;
 
-    event CommitmentSubmitted(uint256 commitIndex, uint256 commit);
-    event SnConsumeSubmitted(uint256 snConsume);
+    event Minted(uint256 value, uint256 commit, uint256 r, uint256 snProduce, uint256 commitIndex, address submitter);
+    event Poured(uint256 commit, uint256 commitIndex, address submitter);
+    event CommitBurnt(uint256 snConsume, address submitter, bool isBurnt);
  
-
 
     constructor() {
         commitmentIndex = 1;
@@ -39,7 +39,7 @@ contract ZcashPourPool is ZcashPourVerifier {
         indexToCommitment[commitmentIndex] = _cm;
         commitmentToIndex[_cm] = commitmentIndex;
 
-        emit CommitmentSubmitted(commitmentIndex, _cm);
+        emit Minted(_value, _cm, _r, _snProduce, commitmentIndex, msg.sender);
 
         commitmentIndex++;
 
@@ -52,6 +52,16 @@ contract ZcashPourPool is ZcashPourVerifier {
     // real ETH.
 
     function pour(uint[2] calldata _pA, uint[2][2] calldata _pB, uint[2] calldata _pC, uint[14] calldata _pubSignals) public {
+        // The `this.` is LOAD-BEARING -- do not remove it to save gas.
+        //
+        // The generated verifier's body is one assembly block ending in
+        // `mstore(0, isValid) return(0, 0x20)`. Assembly `return` halts the
+        // current CALL context, not the Solidity function. Called externally it
+        // halts the verifier's own frame and hands back a bool, as intended.
+        // Called internally there is no separate frame, so it halts pour()
+        // itself -- pour returns immediately, before a single check or state
+        // change, whatever the proof says. The whole function silently becomes
+        // a no-op that looks like success.
         require(this.verifyProof(_pA, _pB, _pC, _pubSignals), "invalid proof");
 
         // Public signal layout, docs/protocol.md section 6:
@@ -85,16 +95,16 @@ contract ZcashPourPool is ZcashPourVerifier {
 
         // ---- effects ----
         snConsumeList[snConsume] = true;
-        emit SnConsumeSubmitted(snConsume);
+        emit CommitBurnt(snConsume, msg.sender, false);
 
         indexToCommitment[commitmentIndex] = cm1;
         commitmentToIndex[cm1] = commitmentIndex;
-        emit CommitmentSubmitted(commitmentIndex, cm1);
+        emit Poured(cm1, commitmentIndex, msg.sender);
         commitmentIndex++;
 
         indexToCommitment[commitmentIndex] = cm2;
         commitmentToIndex[cm2] = commitmentIndex;
-        emit CommitmentSubmitted(commitmentIndex, cm2);
+        emit Poured(cm2, commitmentIndex, msg.sender);
         commitmentIndex++;
     }
 
@@ -120,7 +130,7 @@ contract ZcashPourPool is ZcashPourVerifier {
         // Effects before interaction (reentrancy-safe). totalSupply underflows
         // and reverts if it would drop below the burned value.
         snConsumeList[snConsume] = true;
-        emit SnConsumeSubmitted(snConsume);
+        emit CommitBurnt(snConsume, msg.sender, true);
 
         totalSupply -= _value;
 

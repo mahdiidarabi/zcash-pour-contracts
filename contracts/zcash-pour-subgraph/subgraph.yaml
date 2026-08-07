@@ -8,22 +8,29 @@ dataSources:
     name: ZcashPourPool
     network: sepolia
     source:
-      address: "0xefa1e06043316BEf1bf614253E4f5A2EF10463b1"
+      address: "0x9097c70e0aCE543FE9cE07393b3865864cEF6C5f"
       abi: ZcashPourPool
-      startBlock: 11411907
+      startBlock: 11436530
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
       language: wasm/assemblyscript
       entities:
-        - CommitmentSubmitted
-        - SnConsumeSubmitted
+        - User
+        - Commitment
+        - Nullifier
+        - Mint
+        - Pour
+        - Burn
+        - Pool
       abis:
         - name: ZcashPourPool
           file: ./abis/ZcashPourPool.json
       eventHandlers:
-        - event: CommitmentSubmitted(uint256,uint256)
-          handler: handleCommitmentSubmitted
-        - event: SnConsumeSubmitted(uint256)
-          handler: handleSnConsumeSubmitted
+        - event: CommitBurnt(uint256,address,bool)
+          handler: handleCommitBurnt
+        - event: Minted(uint256,uint256,uint256,uint256,uint256,address)
+          handler: handleMinted
+        - event: Poured(uint256,uint256,address)
+          handler: handlePoured
       file: ./src/zcash-pour-pool.ts
